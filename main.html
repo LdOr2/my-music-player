@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的音樂</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        :root {
+            --primary-text: #ffffff;
+            --secondary-text: #b3b3b3;
+            --background-color: #121212;
+            --container-bg: #1a1a1a;
+            --accent-color: #1db954;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--background-color);
+            color: var(--primary-text);
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #333;
+            padding-bottom: 20px;
+        }
+        h1 {
+            margin: 0;
+        }
+        #upload-label {
+            background-color: var(--accent-color);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        #file-input {
+            display: none;
+        }
+        #song-list {
+            list-style: none;
+            padding: 0;
+            margin-top: 20px;
+        }
+        .song-item {
+            display: flex;
+            align-items: center;
+            padding: 15px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .song-item:hover {
+            background-color: #282828;
+        }
+        .song-item-title {
+            font-size: 16px;
+        }
+        #no-songs-message {
+            color: var(--secondary-text);
+            text-align: center;
+            margin-top: 50px;
+            font-size: 18px;
+        }
+
+        /* --- 響應式設計 --- */
+        @media (max-width: 600px) {
+            .container {
+                padding: 15px; /* 減少邊緣留白 */
+            }
+
+            header {
+                flex-direction: column; /* 將標題和按鈕垂直堆疊 */
+                align-items: flex-start; /* 左對齊 */
+                gap: 15px; /* 在堆疊的項目之間增加間距 */
+            }
+
+            #upload-label {
+                width: 100%; /* 讓上傳按鈕變為全寬 */
+                text-align: center;
+                box-sizing: border-box;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Music</h1>
+            <label for="file-input" id="upload-label">上傳 MP3</label>
+            <input type="file" id="file-input" multiple accept="audio/*">
+        </header>
+
+        <ul id="song-list">
+            <!-- 歌曲將會動態地加入此處 -->
+        </ul>
+        <p id="no-songs-message">尚未有任何歌曲。上傳一些 MP3 來開始吧！</p>
+    </div>
+
+    <script>
+        // --- 開始：內嵌的資料庫幫助腳本 ---
+        const DB_NAME = 'mp3PlayerDB';
+        const STORE_NAME = 'songs';
+        let db;
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                if (db) {
+                    return resolve(db);
+                }
+                const request = indexedDB.open(DB_NAME, 1);
+
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                    }
+                };
+
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    resolve(db);
+                };
+
+                request.onerror = (event) => {
+                    console.error("資料庫錯誤: ", event.target.errorCode);
+                    reject("資料庫錯誤: " + event.target.errorCode);
+                };
+            });
+        }
+
+        function addSongs(files) {
+            return new Promise(async (resolve, reject) => {
+                const db = await initDB();
+                const transaction = db.transaction([STORE_NAME], 'readwrite');
+                const store = transaction.objectStore(STORE_NAME);
+                
+                let filesAdded = 0;
+                if (files.length === 0) {
+                    resolve();
+                    return;
+                }
+
+                files.forEach(file => {
+                    const request = store.add(file);
+                    request.onsuccess = () => {
+                        filesAdded++;
+                        if (filesAdded === files.length) {
+                            resolve();
+                        }
+                    };
+                    request.onerror = (event) => {
+                        reject("加入檔案時出錯: " + event.target.error);
+                    };
+                });
+
+                transaction.oncomplete = () => {
+                    console.log('所有檔案已成功加入。');
+                };
+                transaction.onerror = (event) => {
+                    reject('交易錯誤: ' + event.target.error);
+                };
+            });
+        }
+
+        function getSongs() {
+            return new Promise(async (resolve, reject) => {
+                const db = await initDB();
+                const transaction = db.transaction([STORE_NAME], 'readonly');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.getAll();
+
+                request.onsuccess = (event) => {
+                    resolve(event.target.result);
+                };
+
+                request.onerror = (event) => {
+                    reject("讀取歌曲時出錯: " + event.target.error);
+                };
+            });
+        }
+        // --- 結束：內嵌的資料庫幫助腳本 ---
+
+        const fileInput = document.getElementById('file-input');
+        const songListEl = document.getElementById('song-list');
+        const noSongsMessage = document.getElementById('no-songs-message');
+
+        // 註冊 Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(err => console.log('Service worker 註冊失敗:', err));
+        }
+
+        async function loadAndDisplaySongs() {
+            const songs = await getSongs();
+            songListEl.innerHTML = ''; // 清除目前列表
+
+            if (songs.length > 0) {
+                noSongsMessage.style.display = 'none';
+                songs.forEach((song, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'song-item';
+                    li.innerHTML = `<span class="song-item-title">${song.name.replace(/\.mp3/i, '')}</span>`;
+                    li.addEventListener('click', () => {
+                        // 儲存被點擊歌曲的索引值，並導向至播放器頁面
+                        localStorage.setItem('currentTrackIndex', index);
+                        const currentUrl = window.location.href;
+                        const playerUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1) + 'player.html';
+                        window.location.href = playerUrl;
+                    });
+                    songListEl.appendChild(li);
+                });
+            } else {
+                noSongsMessage.style.display = 'block';
+            }
+        }
+
+        fileInput.addEventListener('change', async (event) => {
+            const files = event.target.files;
+            if (files.length === 0) return;
+
+            const renamedFiles = [];
+            for (const file of Array.from(files)) {
+                const originalName = file.name.replace(/\.mp3$/i, '');
+                const newName = prompt(`為 "${originalName}" 輸入新名稱:`, originalName);
+
+                if (newName && newName.trim() !== "") {
+                    // 建立一個帶有新名稱的新檔案物件，因為原始檔案是唯讀的
+                    const renamedFile = new File([file], `${newName.trim()}.mp3`, { type: file.type, lastModified: file.lastModified });
+                    renamedFiles.push(renamedFile);
+                } else {
+                    // 如果使用者取消或輸入空名稱，則保留原始檔案
+                    renamedFiles.push(file);
+                }
+            }
+
+            if (renamedFiles.length > 0) {
+                await addSongs(renamedFiles);
+                loadAndDisplaySongs(); // 重新整理列表以顯示可能的新名稱
+            }
+            
+            // 重設檔案輸入，以便使用者可以再次上傳相同的檔案
+            event.target.value = '';
+        });
+
+        // 初始載入
+        document.addEventListener('DOMContentLoaded', loadAndDisplaySongs);
+    </script>
+
+</body>
+</html>
+
